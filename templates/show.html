@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block content %}
+<table>
+    <thead>
+        <tr>
+            <th>Date &amp; Time (UTC)</th>
+            {% for column in columns %}
+            <th colspan="{{ column.size }}">{{ column.name }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in data %}
+        <tr>
+            <td>{{ row["time"] }}</td>
+            {% for column in columns %}
+            {% for item in row["data"].getlist(column.name) %}
+            <td>{{ item }}</td>
+            {% endfor %}
+            {% for _ in range(row["data"].getlist(column.name) | length, column.size) %}
+            <td></td>
+            {% endfor %}
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
