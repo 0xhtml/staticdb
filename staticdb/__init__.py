@@ -6,12 +6,13 @@ import functools
 import sqlite3
 import uuid
 from typing import NamedTuple
+from urllib.parse import parse_qsl, urlencode
 
 import jinja2
 import sqlalchemy
 from databases import Database
 from starlette.applications import Starlette
-from starlette.datastructures import QueryParams
+from starlette.datastructures import ImmutableMultiDict
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
@@ -26,16 +27,22 @@ _ENV = jinja2.Environment(
 _TEMPLATES = Jinja2Templates(env=_ENV)
 
 
-class _QueryParamsType(sqlalchemy.types.TypeDecorator):
+class _DictType(sqlalchemy.types.TypeDecorator):
     impl = sqlalchemy.String
 
     def process_bind_param(self, value, dialect: sqlalchemy.Dialect) -> str:
-        assert isinstance(value, QueryParams)
-        return str(value)
+        assert isinstance(value, ImmutableMultiDict)
+        assert all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in value.multi_items()
+        )
+        return urlencode(value.multi_items())
 
-    def process_result_value(self, value, dialect: sqlalchemy.Dialect) -> QueryParams:
+    def process_result_value(
+        self, value, dialect: sqlalchemy.Dialect
+    ) -> ImmutableMultiDict[str, str]:
         assert isinstance(value, str)
-        return QueryParams(value)
+        return ImmutableMultiDict(parse_qsl(value, keep_blank_values=True))
 
 
 _METADATA = sqlalchemy.MetaData()
@@ -52,7 +59,7 @@ _API_DATA = sqlalchemy.Table(
     ),
     sqlalchemy.Column("api", sqlalchemy.Uuid, nullable=False),
     sqlalchemy.Column("time", sqlalchemy.DateTime, nullable=False),
-    sqlalchemy.Column("data", _QueryParamsType, nullable=False),
+    sqlalchemy.Column("data", _DictType, nullable=False),
 )
 _DATABASE = Database("sqlite+aiosqlite:///db.sqlite3")
 
@@ -121,11 +128,23 @@ async def _api(request: Request) -> Response:
     if not await _is_api(request):
         return _msg(request, "API not found", 404)
 
+    if request.method == "GET":
+        data = request.query_params
+    elif request.method == "POST":
+        async with request.form() as form:
+            data = ImmutableMultiDict(
+                (key, value)
+                for key, value in form.multi_items()
+                if isinstance(key, str)
+            )
+    else:
+        assert False
+
     await _DATABASE.execute(
         _API_DATA.insert().values(
             api=request.path_params["api_id"],
             time=datetime.datetime.now(tz=datetime.UTC),
-            data=request.query_params,
+            data=data,
         )
     )
 
@@ -137,7 +156,7 @@ app = Starlette(
         Route("/", endpoint=_index),
         Route("/create", endpoint=_create),
         Route("/show/{api_id:uuid}", endpoint=_show),
-        Route("/api/{api_id:uuid}", endpoint=_api),
+        Route("/api/{api_id:uuid}", endpoint=_api, methods=["GET", "POST"]),
     ],
     lifespan=_lifespan,
 )
