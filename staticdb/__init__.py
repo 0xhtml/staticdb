@@ -71,9 +71,11 @@ async def _lifespan(app: Starlette):
 
 
 def _msg(request: Request, msg: str, status_code: int = 200) -> Response:
-    return _TEMPLATES.TemplateResponse(
-        request, "msg.html", {"msg": msg}, status_code=status_code
-    )
+    if "text/html" in request.headers.get("Accept", ""):
+        return _TEMPLATES.TemplateResponse(
+            request, "msg.html", {"msg": msg}, status_code=status_code
+        )
+    return Response(msg, status_code, media_type="text/plain")
 
 
 def _index(request: Request) -> Response:
